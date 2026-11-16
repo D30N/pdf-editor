@@ -146,6 +146,10 @@ body.dark .error{background:#3b1111;color:#fca5a5;border-color:#7f1d1d}
             <option value="landscape">A4 Landscape</option>
           </select>
         </div>
+        <div class="row">
+          <label data-i18n="fileName">File name</label>
+          <input type="text" id="photoFileName" value="photos">
+        </div>
         <button class="btn btn-primary btn-block" id="makePdfBtn" disabled data-i18n="makePdf">Make PDF</button>
         <p class="hint" data-i18n="photosHint">Photos stay in the order shown. Use the arrows to reorder them.</p>
       </div>
@@ -174,6 +178,7 @@ en: {
   addTextHint: "Tip: click Add text, then click anywhere on a page to write there.",
   fontNote: "Edited text uses a standard font. Malayalam text may not appear correctly in the edited PDF.",
   settings: "Settings", pageSize: "Page size", makePdf: "Make PDF",
+  fileName: "File name",
   photosHint: "Photos stay in the order shown. Use the arrows to reorder them.",
   addingText: "Adding text: click on a page to write there.",
   errorPdf: "That file is not a PDF. Please choose a PDF file.",
@@ -196,6 +201,7 @@ ml: {
   addTextHint: "Tip: Add text അമർത്തി, പിന്നെ page-ൽ എവിടെയും click ചെയ്ത് എഴുതാം.",
   fontNote: "തിരുത്തിയ text standard font-il ആണ് വരുന്നത്. Malayalam text edited PDF-il ശരിയായി വരണമെന്നില്ല.",
   settings: "Settings", pageSize: "Page size", makePdf: "PDF ഉണ്ടാക്കൂ",
+  fileName: "ഫയലിന്റെ പേര്",
   photosHint: "Photos കാണുന്ന order-il തന്നെ PDF-il വരും. Arrows ഉപയോഗിച്ച് order മാറ്റാം.",
   addingText: "Text ചേർക്കുന്നു: എഴുതാൻ page-il click ചെയ്യൂ.",
   errorPdf: "ഇത് PDF അല്ല. PDF file തിരഞ്ഞെടുക്കൂ.",
@@ -599,7 +605,9 @@ $("makePdfBtn").onclick = async ()=>{
       page.drawImage(img, { x: (pw - w) / 2, y: (ph - h) / 2, width: w, height: h });
     }
     const out = await doc.save();
-    downloadBlob(new Blob([out], { type: "application/pdf" }), "photos.pdf");
+    let name = ($("photoFileName").value || "").trim().replace(/[\\/:*?"<>|]/g, "").replace(/\.pdf$/i, "");
+    if(!name) name = "photos";
+    downloadBlob(new Blob([out], { type: "application/pdf" }), name + ".pdf");
   }catch(err){
     showError($("photoError"), t("errorImg"));
   }finally{
