@@ -54,7 +54,7 @@ h1 span{color:var(--teal)}
 .note{font-size:13px;color:var(--muted);background:var(--mint);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:12px}
 .error{display:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:10px 12px;font-size:14px;margin-top:12px}
 body.dark .error{background:#3b1111;color:#fca5a5;border-color:#7f1d1d}
-.pages{display:flex;flex-direction:column;gap:18px}
+.pages{display:flex;flex-direction:column;gap:18px;overflow-x:auto}
 .page-wrap{position:relative;margin:0 auto;box-shadow:0 2px 12px rgba(0,0,0,.18);line-height:0}
 .page-wrap canvas{display:block;max-width:100%;height:auto}
 .txt{position:absolute;line-height:1;cursor:text;border-radius:2px;color:transparent;white-space:pre}
@@ -255,10 +255,10 @@ function fileStem(name){ return name.replace(/\.[^.]+$/, "") || "document"; }
 
 /* ============ EDIT PDF MODE ============ */
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-const SCALE = 1.5;
+let SCALE = 1.5;
 let pdfDoc = null, pdfBytes = null, pdfName = "document.pdf";
-let pageItems = [];   /* per page: [{str,x,y,w,h}] in PDF points */
-let edits = {};       /* "page:item" -> new string */
+let pageUnits = [];   /* per page: [{str,x,y,w,h}] in PDF points, one per word */
+let edits = {};       /* "page:unit" -> new string */
 let newTexts = [];    /* {page,x,y,str,size} in PDF points */
 let addTextMode = false;
 let editingInput = null;
@@ -294,13 +294,45 @@ async function loadPdf(file){
   try{
     pdfBytes = await file.arrayBuffer();
     pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
-    edits = {}; newTexts = []; pageItems = [];
+    edits = {}; newTexts = []; pageUnits = [];
+    const first = await pdfDoc.getPage(1);
+    const ptW = first.getViewport({ scale: 1 }).width;
+    const avail = $("pagesBox").clientWidth || 800;
+    SCALE = Math.max(0.5, Math.min(1.5, avail / ptW));
     await renderPages();
     refreshDownloadBtn();
   }catch(err){
     showError($("pdfError"), t("errorPdf"));
     pdfDoc = null; refreshDownloadBtn();
   }
+}
+
+/* Merge letter-split text items into whole words, so one word edits as one unit. */
+function mergeWords(items){
+  const sorted = items.slice().sort((a,b)=> (b.y - a.y) || (a.x - b.x));
+  const lines = [];
+  for(const it of sorted){
+    let line = lines.find(l => Math.abs(l.y - it.y) < Math.max(2, it.h * 0.25));
+    if(!line){ line = { y: it.y, items: [] }; lines.push(line); }
+    line.items.push(it);
+  }
+  const units = [];
+  for(const line of lines){
+    line.items.sort((a,b)=> a.x - b.x);
+    let cur = null;
+    for(const it of line.items){
+      const gap = cur ? it.x - (cur.x + cur.w) : 0;
+      if(!cur || gap > Math.max(1.5, it.h * 0.2)){
+        cur = { str: it.str, x: it.x, y: it.y, w: it.w, h: it.h };
+        units.push(cur);
+      }else{
+        cur.str += it.str;
+        cur.w = (it.x + it.w) - cur.x;
+        cur.h = Math.max(cur.h, it.h);
+      }
+    }
+  }
+  return units;
 }
 
 async function renderPages(){
@@ -319,33 +351,34 @@ async function renderPages(){
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
     const tc = await page.getTextContent();
     const items = [];
-    tc.items.forEach((it, idx)=>{
+    tc.items.forEach((it)=>{
       if(!it.str || !it.str.trim()) return;
       const tr = it.transform;
       const fs = Math.hypot(tr[2], tr[3]) || 12;
       const h = it.height || fs;
       const w = it.width || fs * it.str.length * 0.5;
-      const x = tr[4], y = tr[5];
-      items.push({ str: it.str, x, y, w, h, idx });
+      items.push({ str: it.str, x: tr[4], y: tr[5], w, h });
+    });
+    const units = mergeWords(items);
+    pageUnits[p] = units;
+    units.forEach((u, uIdx)=>{
       const div = document.createElement("div");
       div.className = "txt";
-      div.textContent = it.str;
-      div.style.left = (x * SCALE) + "px";
-      div.style.top = (viewport.height - y * SCALE - h * SCALE) + "px";
-      div.style.width = (w * SCALE + 2) + "px";
-      div.style.height = (h * SCALE + 2) + "px";
-      div.style.fontSize = (h * SCALE) + "px";
-      const itemIdx = items.length - 1;
-      div.dataset.page = p; div.dataset.item = itemIdx;
-      div.title = it.str;
+      div.textContent = u.str;
+      div.style.left = (u.x * SCALE) + "px";
+      div.style.top = (viewport.height - u.y * SCALE - u.h * SCALE) + "px";
+      div.style.width = (u.w * SCALE + 2) + "px";
+      div.style.height = (u.h * SCALE + 2) + "px";
+      div.style.fontSize = (u.h * SCALE) + "px";
+      div.dataset.page = p; div.dataset.unit = uIdx;
+      div.title = u.str;
       div.addEventListener("click", ev=>{
         ev.stopPropagation();
         if(addTextMode) return;
-        openTextEditor(div, p, itemIdx, it.str);
+        openTextEditor(div, p, uIdx, u.str);
       });
       wrap.appendChild(div);
     });
-    pageItems[p] = items;
     wrap.addEventListener("click", ev=>{
       if(!addTextMode || ev.target !== canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -357,9 +390,9 @@ async function renderPages(){
   }
 }
 
-function openTextEditor(div, page, itemIdx, oldStr){
+function openTextEditor(div, page, unitIdx, oldStr){
   closeEditor();
-  const key = page + ":" + itemIdx;
+  const key = page + ":" + unitIdx;
   const input = document.createElement("input");
   input.className = "txt-edit";
   input.type = "text";
@@ -456,20 +489,20 @@ $("downloadBtn").onclick = async ()=>{
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const pages = doc.getPages();
     for(const key of Object.keys(edits)){
-      const [p, itemIdx] = key.split(":").map(Number);
-      const it = pageItems[p] && pageItems[p][itemIdx];
-      if(!it) continue;
+      const [p, unitIdx] = key.split(":").map(Number);
+      const u = pageUnits[p] && pageUnits[p][unitIdx];
+      if(!u) continue;
       const page = pages[p - 1];
       const newStr = edits[key];
-      const size = it.h;
+      const size = u.h;
       const newW = newStr ? font.widthOfTextAtSize(newStr, size) : 0;
       page.drawRectangle({
-        x: it.x - 1, y: it.y - 2,
-        width: Math.max(it.w, newW) + 3, height: it.h + 4,
+        x: u.x - 1, y: u.y - 2,
+        width: Math.max(u.w, newW) + 3, height: u.h + 4,
         color: rgb(1, 1, 1)
       });
       if(newStr){
-        page.drawText(newStr, { x: it.x, y: it.y, size, font, color: rgb(0, 0, 0) });
+        page.drawText(newStr, { x: u.x, y: u.y, size, font, color: rgb(0, 0, 0) });
       }
     }
     for(const nt of newTexts){
