@@ -420,7 +420,7 @@ function openTextEditor(div, page, unitIdx, oldStr){
   const commit = save=>{
     if(done) return; done = true;
     const val = input.value;
-    if(save && val !== oldStr && val.trim() !== ""){ edits[key] = val; div.classList.add("edited"); div.textContent = val; div.style.width = "auto"; }
+    if(save && val !== oldStr && val.trim() !== ""){ edits[key] = val; div.classList.add("edited"); const origW = parseFloat(div.style.width); div.textContent = val; div.style.width = "auto"; div.style.width = Math.max(div.offsetWidth, origW) + "px"; }
     else if(save && val.trim() === ""){ edits[key] = ""; div.classList.add("edited"); div.textContent = ""; }
     closeEditor(); refreshDownloadBtn();
   };
